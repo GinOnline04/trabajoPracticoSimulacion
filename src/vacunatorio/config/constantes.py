@@ -1,0 +1,20 @@
+INFINITO = float("inf")
+
+
+COVID = "COVID"
+GRIPE = "Gripe"
+
+
+EVENTO_INICIALIZACION = "Inicializacion"
+EVENTO_LLEGADA_COVID = "Llegada COVID"
+EVENTO_LLEGADA_GRIPE = "Llegada gripe"
+EVENTO_FIN_VACUNACION = "Fin vacunacion"
+EVENTO_INICIO_INTERRUPCION = "Inicio interrupcion"
+EVENTO_FIN_INTERRUPCION = "Fin interrupcion"
+EVENTO_VENCIMIENTO_GRIPE = "Vencimiento gripe"
+EVENTO_FIN_SIMULACION = "Fin de simulacion"
+EVENTO_FIN_MAX_ITERACIONES = "Fin por max iteraciones"
+
+
+COEFICIENTE_RK_IZQUIERDO = 41.4
+COEFICIENTE_RK_DERECHO = 0.0575

@@ -1,0 +1,130 @@
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+RAIZ_PROYECTO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RAIZ_PROYECTO))
+
+from src.vacunatorio.config.constantes import (
+    COVID,
+    EVENTO_FIN_MAX_ITERACIONES,
+    EVENTO_FIN_SIMULACION,
+    EVENTO_INICIO_INTERRUPCION,
+)
+from src.vacunatorio.config.parametros import Parametros
+from src.vacunatorio.dominio.modelos import Paciente
+from src.vacunatorio.simulacion.motor import Simulacion
+
+
+def buscar_estadistica(resultado, nombre):
+    for estadistica, valor in resultado["estadisticas"]:
+        if estadistica == nombre:
+            return valor
+    raise AssertionError(f"No existe la estadistica {nombre}")
+
+
+def probar_filtro_i_j_y_fila_final():
+    p = Parametros(tiempo_simulacion=3600, mostrar_desde=5, mostrar_cantidad=7)
+    resultado = Simulacion(p).simular()
+    filas = resultado["filas"]
+
+    assert len(filas) <= 7
+    assert filas[0]["Iteracion"] == 5
+    assert filas[-1]["Iteracion"] <= 11
+    assert all(fila["Evento"] != EVENTO_FIN_SIMULACION for fila in filas)
+
+
+def probar_fila_final_solo_si_cae_en_rango():
+    p_base = Parametros(tiempo_simulacion=3600, mostrar_desde=0, mostrar_cantidad=100000)
+    resultado_base = Simulacion(p_base).simular()
+    iteracion_final = resultado_base["filas"][-1]["Iteracion"]
+
+    p_con_final = Parametros(
+        tiempo_simulacion=3600,
+        mostrar_desde=iteracion_final,
+        mostrar_cantidad=1,
+    )
+    filas_con_final = Simulacion(p_con_final).simular()["filas"]
+
+    assert len(filas_con_final) == 1
+    assert filas_con_final[0]["Evento"] == EVENTO_FIN_SIMULACION
+    assert filas_con_final[0]["Reloj (seg)"] == 3600
+
+
+def probar_interrupcion_exactamente_en_x_no_se_procesa():
+    p = Parametros(
+        tiempo_simulacion=3600,
+        intervalo_interrupcion=3600,
+        media_llegada_covid=10**9,
+        media_llegada_gripe=10**9,
+        mostrar_desde=0,
+        mostrar_cantidad=10,
+    )
+    filas = Simulacion(p).simular()["filas"]
+    eventos = [fila["Evento"] for fila in filas]
+
+    assert EVENTO_INICIO_INTERRUPCION not in eventos
+    assert eventos[-1] == EVENTO_FIN_SIMULACION
+
+
+def probar_corte_por_max_iteraciones():
+    p = Parametros(tiempo_simulacion=999999, max_iteraciones=3, mostrar_desde=0, mostrar_cantidad=10)
+    resultado = Simulacion(p).simular()
+    ultima = resultado["filas"][-1]
+
+    assert ultima["Evento"] == EVENTO_FIN_MAX_ITERACIONES
+    assert ultima["Iteracion"] == 3
+    assert ultima["Reloj (seg)"] < p.tiempo_simulacion
+
+
+def probar_parametros_de_caja_y_tiempo():
+    p = Parametros(dosis_caja_covid=3, tiempo_por_paciente=10)
+    simulacion = Simulacion(p)
+
+    for paciente_id in range(1, 5):
+        simulacion.pacientes[paciente_id] = Paciente(paciente_id, COVID, 0, 4)
+        simulacion.cola_covid.append(paciente_id)
+
+    inicio = simulacion.iniciar_lote_covid()
+
+    assert inicio is True
+    assert len(simulacion.lote_actual_pacientes) == 3
+    assert len(simulacion.cola_covid) == 1
+    assert simulacion.fin_vacunacion == 30
+    assert simulacion.cajas_covid_abiertas == 1
+
+
+def probar_runge_kutta_configurable_y_coeficientes_fijos():
+    p = Parametros(rk_t_inicial=0, rk_t_final=0.04, rk_paso=0.02)
+    resultado = Simulacion(p).simular()
+
+    assert len(resultado["rk"]) == 3
+    assert not hasattr(p, "rk_coef_izquierdo")
+    assert not hasattr(p, "rk_coef_derecho")
+    assert buscar_estadistica(resultado, "Tiempo vencimiento gripe por RK (seg)") > 0
+
+
+def probar_interrupcion_parametrizable():
+    p = Parametros(
+        tiempo_simulacion=1000,
+        intervalo_interrupcion=100,
+        duracion_interrupcion=20,
+        mostrar_desde=0,
+        mostrar_cantidad=50,
+    )
+    resultado = Simulacion(p).simular()
+
+    assert buscar_estadistica(resultado, "Interrupciones ocurridas") >= 1
+    assert buscar_estadistica(resultado, "Tiempo total interrumpido (seg)") >= 20
+
+
+if __name__ == "__main__":
+    probar_filtro_i_j_y_fila_final()
+    probar_fila_final_solo_si_cae_en_rango()
+    probar_interrupcion_exactamente_en_x_no_se_procesa()
+    probar_corte_por_max_iteraciones()
+    probar_parametros_de_caja_y_tiempo()
+    probar_runge_kutta_configurable_y_coeficientes_fijos()
+    probar_interrupcion_parametrizable()
+    print("Todas las pruebas pasaron correctamente.")
