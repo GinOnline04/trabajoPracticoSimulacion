@@ -9,6 +9,7 @@ from src.vacunatorio.config.constantes import (
     EVENTO_FIN_VACUNACION,
     EVENTO_INICIALIZACION,
     EVENTO_INICIO_INTERRUPCION,
+    EVENTO_INTERRUPCION_DESCARTADA,
     EVENTO_LLEGADA_COVID,
     EVENTO_LLEGADA_GRIPE,
     EVENTO_VENCIMIENTO_GRIPE,
@@ -109,19 +110,27 @@ class Simulacion:
     def inicializar(self):
         rnd_covid = self.rnd()
         rnd_gripe = self.rnd()
+        rnd_interrupcion, tiempo_interrupcion = self.programar_proxima_interrupcion()
         self.proxima_llegada_covid = tiempo_exponencial(self.p.media_llegada_covid, rnd_covid)
         self.proxima_llegada_gripe = tiempo_exponencial(self.p.media_llegada_gripe, rnd_gripe)
-        self.proxima_interrupcion = self.p.intervalo_interrupcion
         self.agregar_fila(
             EVENTO_INICIALIZACION,
             rnd_llegada_covid=rnd_covid,
             tiempo_llegada_covid=self.proxima_llegada_covid,
             rnd_llegada_gripe=rnd_gripe,
             tiempo_llegada_gripe=self.proxima_llegada_gripe,
+            rnd_interrupcion=rnd_interrupcion,
+            tiempo_interrupcion=tiempo_interrupcion,
         )
 
     def rnd(self):
         return min(0.999999999, max(0.000000001, self.rng.random()))
+
+    def programar_proxima_interrupcion(self):
+        rnd_interrupcion = self.rnd()
+        intervalo = tiempo_exponencial(self.p.media_interrupcion, rnd_interrupcion)
+        self.proxima_interrupcion = self.reloj + intervalo
+        return rnd_interrupcion, intervalo
 
     def proximo_evento(self):
         eventos = [
@@ -137,6 +146,8 @@ class Simulacion:
     def avanzar_reloj(self, nuevo_reloj):
         if self.enfermero_estado == "Ocupado":
             self.tiempo_ocupado += nuevo_reloj - self.ultima_actualizacion_ocupacion
+        elif self.enfermero_estado == "Interrumpido":
+            self.tiempo_interrumpido += nuevo_reloj - self.ultima_actualizacion_ocupacion
         self.ultima_actualizacion_ocupacion = nuevo_reloj
         self.reloj = nuevo_reloj
 
@@ -157,7 +168,7 @@ class Simulacion:
         elif evento == EVENTO_FIN_VACUNACION:
             self.procesar_fin_vacunacion()
         elif evento == EVENTO_INICIO_INTERRUPCION:
-            self.procesar_inicio_interrupcion()
+            self.procesar_llegada_interrupcion()
         elif evento == EVENTO_FIN_INTERRUPCION:
             self.procesar_fin_interrupcion()
         elif evento == EVENTO_VENCIMIENTO_GRIPE:
@@ -245,10 +256,18 @@ class Simulacion:
         self.intentar_iniciar_vacunacion()
         self.agregar_fila(EVENTO_FIN_VACUNACION)
 
-    def procesar_inicio_interrupcion(self):
+    def procesar_llegada_interrupcion(self):
+        rnd_interrupcion, tiempo_interrupcion = self.programar_proxima_interrupcion()
+
+        if self.enfermero_estado == "Interrumpido":
+            self.agregar_fila(
+                EVENTO_INTERRUPCION_DESCARTADA,
+                rnd_interrupcion=rnd_interrupcion,
+                tiempo_interrupcion=tiempo_interrupcion,
+            )
+            return
+
         self.interrupciones += 1
-        self.tiempo_interrumpido += self.p.duracion_interrupcion
-        self.proxima_interrupcion = self.reloj + self.p.intervalo_interrupcion
         self.fin_interrupcion = self.reloj + self.p.duracion_interrupcion
 
         if self.enfermero_estado == "Ocupado":
@@ -256,7 +275,11 @@ class Simulacion:
             self.fin_vacunacion = INFINITO
 
         self.enfermero_estado = "Interrumpido"
-        self.agregar_fila(EVENTO_INICIO_INTERRUPCION)
+        self.agregar_fila(
+            EVENTO_INICIO_INTERRUPCION,
+            rnd_interrupcion=rnd_interrupcion,
+            tiempo_interrupcion=tiempo_interrupcion,
+        )
 
     def procesar_fin_interrupcion(self):
         self.fin_interrupcion = INFINITO
@@ -400,8 +423,8 @@ class Simulacion:
             "Tam grupo gripe": extras.get("grupo", "-") if es_llegada_gripe else "-",
             "RND grupo llegada": extras.get("rnd_grupo", "-"),
             "Tam grupo llegada": extras.get("grupo", "-"),
-            "RND interrupcion": "-",
-            "Tiempo interrupcion": self.p.intervalo_interrupcion,
+            "RND interrupcion": extras.get("rnd_interrupcion", "-"),
+            "Tiempo interrupcion": extras.get("tiempo_interrupcion", "-"),
             "Cola COVID": len(self.cola_covid),
             "Cola gripe": len(self.cola_gripe),
             "Estado enfermero": self.enfermero_estado,
@@ -434,7 +457,7 @@ class Simulacion:
             "Ac personas por llegada": total_llegados,
             "Ac tiempo espera cola": suma_espera_total,
             "Ac tiempo sistema": suma_tiempo_sistema,
-            "Porc gripe aplicadas": self.porcentaje(self.gripe_vacunados, self.gripe_llegados),
+            "Porc gripe aplicadas": self.porcentaje(self.gripe_vacunados, dosis_gripe_procesadas),
             "Porc covid aplicadas": self.porcentaje(self.covid_vacunados, self.covid_llegados),
             "Porc gripe vencidas": self.porcentaje(self.dosis_gripe_descartadas, dosis_gripe_procesadas),
             "Tiempo promedio atencion": self.tiempo_ocupado / total_atendidos if total_atendidos else 0,
@@ -481,7 +504,7 @@ class Simulacion:
         suma_tiempo_sistema = self.suma_tiempo_sistema_covid + self.suma_tiempo_sistema_gripe
         dosis_gripe_procesadas = self.gripe_vacunados + self.dosis_gripe_descartadas
         return [
-            ("Porcentaje de Vacunas de gripe aplicadas", self.porcentaje(self.gripe_vacunados, self.gripe_llegados)),
+            ("Porcentaje de Vacunas de gripe aplicadas", self.porcentaje(self.gripe_vacunados, dosis_gripe_procesadas)),
             ("Porcentaje de Vacunas de COVID aplicadas", self.porcentaje(self.covid_vacunados, self.covid_llegados)),
             ("Porcentaje de Vacunas de Gripe Vencidas", self.porcentaje(self.dosis_gripe_descartadas, dosis_gripe_procesadas)),
             ("Tiempo Promedio de Atencion", self.tiempo_ocupado / total_atendidos if total_atendidos else 0),
@@ -495,7 +518,7 @@ class Simulacion:
             ("Personas gripe vacunadas", self.gripe_vacunados),
             ("Espera promedio COVID (seg)", self.suma_espera_covid / self.covid_atendidos if self.covid_atendidos else 0),
             ("Espera promedio gripe (seg)", self.suma_espera_gripe / self.gripe_atendidos if self.gripe_atendidos else 0),
-            ("Porcentaje de utilizacion enfermero", 100 * self.tiempo_ocupado / self.p.tiempo_simulacion),
+            ("Porcentaje de utilizacion enfermero", self.porcentaje(self.tiempo_ocupado, self.reloj)),
             ("Porcentaje de pacientes vacunados", 100 * total_vacunados / total_llegados if total_llegados else 0),
             ("Maxima cola COVID", self.max_cola_covid),
             ("Maxima cola gripe", self.max_cola_gripe),

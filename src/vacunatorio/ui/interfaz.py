@@ -257,7 +257,7 @@ class Aplicacion(tk.Tk):
                 ("tiempo_por_paciente", "Segundos por paciente", 22),
             ]),
             ("Interrupcion", [
-                ("intervalo_interrupcion", "Cada cuantos seg ocurre", 3600),
+                ("media_interrupcion", "Media llegada interrupcion (seg)", 3600),
                 ("duracion_interrupcion", "Duracion interrupcion (seg)", 300),
             ]),
             ("Runge-Kutta", [

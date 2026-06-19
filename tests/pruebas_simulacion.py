@@ -11,6 +11,7 @@ from src.vacunatorio.config.constantes import (
     EVENTO_FIN_MAX_ITERACIONES,
     EVENTO_FIN_SIMULACION,
     EVENTO_INICIO_INTERRUPCION,
+    EVENTO_INTERRUPCION_DESCARTADA,
 )
 from src.vacunatorio.config.parametros import Parametros
 from src.vacunatorio.dominio.modelos import Paciente
@@ -54,7 +55,7 @@ def probar_fila_final_se_muestra_aunque_no_caiga_en_rango():
 def probar_interrupcion_exactamente_en_x_no_se_procesa():
     p = Parametros(
         tiempo_simulacion=3600,
-        intervalo_interrupcion=3600,
+        media_interrupcion=10**9,
         media_llegada_covid=10**9,
         media_llegada_gripe=10**9,
         mostrar_desde=0,
@@ -141,7 +142,7 @@ def probar_vector_muestra_atributos_de_pacientes_presentes():
 def probar_interrupcion_parametrizable():
     p = Parametros(
         tiempo_simulacion=1000,
-        intervalo_interrupcion=100,
+        media_interrupcion=100,
         duracion_interrupcion=20,
         mostrar_desde=0,
         mostrar_cantidad=50,
@@ -149,7 +150,63 @@ def probar_interrupcion_parametrizable():
     resultado = Simulacion(p).simular()
 
     assert buscar_estadistica(resultado, "Interrupciones ocurridas") >= 1
-    assert buscar_estadistica(resultado, "Tiempo total interrumpido (seg)") >= 20
+    assert buscar_estadistica(resultado, "Tiempo total interrumpido (seg)") > 0
+
+
+def probar_interrupcion_exponencial_muestra_rnd():
+    p = Parametros(tiempo_simulacion=10, media_interrupcion=100)
+    fila_inicial = Simulacion(p).simular()["filas"][0]
+
+    assert fila_inicial["RND interrupcion"] != "-"
+    assert fila_inicial["Tiempo interrupcion"] > 0
+    assert fila_inicial["Prox interrupcion"] == fila_inicial["Tiempo interrupcion"]
+
+
+def probar_interrupcion_descartada_no_modifica_la_actual():
+    simulacion = Simulacion(Parametros(mostrar_desde=0, mostrar_cantidad=10))
+    simulacion.reloj = 100
+    simulacion.enfermero_estado = "Interrumpido"
+    simulacion.fin_interrupcion = 180
+
+    simulacion.procesar_llegada_interrupcion()
+
+    assert simulacion.fin_interrupcion == 180
+    assert simulacion.interrupciones == 0
+    assert simulacion.filas[-1]["Evento"] == EVENTO_INTERRUPCION_DESCARTADA
+    assert simulacion.proxima_interrupcion > simulacion.reloj
+
+
+def probar_tiempo_interrumpido_se_acumula_con_el_reloj():
+    simulacion = Simulacion(Parametros())
+    simulacion.reloj = 10
+    simulacion.ultima_actualizacion_ocupacion = 10
+    simulacion.enfermero_estado = "Interrumpido"
+
+    simulacion.avanzar_reloj(37.5)
+
+    assert simulacion.tiempo_interrumpido == 27.5
+
+
+def probar_porcentajes_gripe_sobre_dosis_procesadas():
+    simulacion = Simulacion(Parametros())
+    simulacion.gripe_vacunados = 8
+    simulacion.dosis_gripe_descartadas = 2
+    simulacion.gripe_llegados = 100
+    estadisticas = dict(simulacion.estadisticas())
+
+    assert estadisticas["Porcentaje de Vacunas de gripe aplicadas"] == 80
+    assert estadisticas["Porcentaje de Vacunas de Gripe Vencidas"] == 20
+
+
+def probar_utilizacion_usa_tiempo_real_transcurrido():
+    simulacion = Simulacion(Parametros(tiempo_simulacion=1000))
+    simulacion.reloj = 100
+    simulacion.tiempo_ocupado = 25
+
+    assert buscar_estadistica(
+        {"estadisticas": simulacion.estadisticas()},
+        "Porcentaje de utilizacion enfermero",
+    ) == 25
 
 
 if __name__ == "__main__":
@@ -161,4 +218,9 @@ if __name__ == "__main__":
     probar_runge_kutta_configurable()
     probar_vector_muestra_atributos_de_pacientes_presentes()
     probar_interrupcion_parametrizable()
+    probar_interrupcion_exponencial_muestra_rnd()
+    probar_interrupcion_descartada_no_modifica_la_actual()
+    probar_tiempo_interrumpido_se_acumula_con_el_reloj()
+    probar_porcentajes_gripe_sobre_dosis_procesadas()
+    probar_utilizacion_usa_tiempo_real_transcurrido()
     print("Todas las pruebas pasaron correctamente.")
