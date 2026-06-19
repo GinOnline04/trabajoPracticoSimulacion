@@ -1,4 +1,5 @@
 import random
+from collections import deque
 from dataclasses import dataclass, field
 
 from src.vacunatorio.config.constantes import (
@@ -29,8 +30,8 @@ class Simulacion:
     iteracion: int = 0
     rng: random.Random = field(init=False)
     pacientes: dict = field(default_factory=dict)
-    cola_covid: list = field(default_factory=list)
-    cola_gripe: list = field(default_factory=list)
+    cola_covid: deque = field(default_factory=deque)
+    cola_gripe: deque = field(default_factory=deque)
 
     enfermero_estado: str = "Libre"
     lote_actual_tipo: str = ""
@@ -49,6 +50,7 @@ class Simulacion:
     fin_interrupcion: float = INFINITO
 
     id_paciente: int = 0
+    id_grupo_llegada: int = 0
     covid_llegados: int = 0
     gripe_llegados: int = 0
     lotes_covid_llegados: int = 0
@@ -99,7 +101,7 @@ class Simulacion:
                 break
 
         if self.iteracion >= self.p.max_iteraciones and self.reloj < self.p.tiempo_simulacion:
-            self.agregar_fila(EVENTO_FIN_MAX_ITERACIONES)
+            self.agregar_fila(EVENTO_FIN_MAX_ITERACIONES, mostrar_objetos=False)
 
         return {
             "filas": self.filas,
@@ -154,11 +156,11 @@ class Simulacion:
     def finalizar_en_tiempo_x(self):
         self.avanzar_reloj(self.p.tiempo_simulacion)
         self.iteracion += 1
-        self.agregar_fila(EVENTO_FIN_SIMULACION)
+        self.agregar_fila(EVENTO_FIN_SIMULACION, mostrar_objetos=False)
 
     def agregar_fila_final_si_falta(self):
         if not self.filas or self.filas[-1]["Evento"] != EVENTO_FIN_SIMULACION:
-            self.agregar_fila(EVENTO_FIN_SIMULACION)
+            self.agregar_fila(EVENTO_FIN_SIMULACION, mostrar_objetos=False)
 
     def procesar_evento(self, evento):
         if evento == EVENTO_LLEGADA_COVID:
@@ -177,7 +179,7 @@ class Simulacion:
     def procesar_llegada(self, vacuna):
         rnd_grupo = self.rnd()
         grupo = grupo_uniforme_1_a_4(rnd_grupo)
-        pacientes_nuevos = self.crear_pacientes(vacuna, grupo)
+        self.crear_pacientes(vacuna, grupo)
 
         self.max_cola_covid = max(self.max_cola_covid, len(self.cola_covid))
         self.max_cola_gripe = max(self.max_cola_gripe, len(self.cola_gripe))
@@ -194,7 +196,6 @@ class Simulacion:
                 grupo=grupo,
                 rnd_llegada_covid=rnd_llegada,
                 tiempo_llegada_covid=intervalo,
-                pacientes_evento=pacientes_nuevos,
             )
         else:
             self.lotes_gripe_llegados += 1
@@ -208,16 +209,20 @@ class Simulacion:
                 grupo=grupo,
                 rnd_llegada_gripe=rnd_llegada,
                 tiempo_llegada_gripe=intervalo,
-                pacientes_evento=pacientes_nuevos,
             )
 
     def crear_pacientes(self, vacuna, grupo):
-        pacientes_nuevos = []
+        self.id_grupo_llegada += 1
         for _ in range(grupo):
             self.id_paciente += 1
-            paciente = Paciente(self.id_paciente, vacuna, self.reloj, grupo)
+            paciente = Paciente(
+                self.id_paciente,
+                vacuna,
+                self.reloj,
+                grupo,
+                grupo_llegada=self.id_grupo_llegada,
+            )
             self.pacientes[paciente.id] = paciente
-            pacientes_nuevos.append(paciente.id)
 
             if vacuna == COVID:
                 self.cola_covid.append(paciente.id)
@@ -226,7 +231,6 @@ class Simulacion:
                 self.cola_gripe.append(paciente.id)
                 self.gripe_llegados += 1
 
-        return pacientes_nuevos
 
     def procesar_fin_vacunacion(self):
         tipo = self.lote_actual_tipo
@@ -299,15 +303,20 @@ class Simulacion:
         self.dosis_gripe_descartadas += descartadas
         self.dosis_gripe_abiertas = 0
         self.vencimiento_gripe = INFINITO
-        self.agregar_fila(EVENTO_VENCIMIENTO_GRIPE, dosis_descartadas_evento=descartadas)
         self.intentar_iniciar_vacunacion()
+        self.agregar_fila(EVENTO_VENCIMIENTO_GRIPE, dosis_descartadas_evento=descartadas)
 
-    def abrir_caja_gripe_si_hace_falta(self):
-        if self.dosis_gripe_abiertas == 0 and self.cola_gripe:
-            self.caja_gripe_id += 1
-            self.cajas_gripe_abiertas += 1
-            self.dosis_gripe_abiertas = self.p.dosis_caja_gripe
-            self.vencimiento_gripe = self.reloj + self.tiempo_vencimiento_gripe
+    def abrir_caja_gripe(self):
+        self.caja_gripe_id += 1
+        self.cajas_gripe_abiertas += 1
+        self.dosis_gripe_abiertas += self.p.dosis_caja_gripe
+        self.vencimiento_gripe = self.reloj + self.tiempo_vencimiento_gripe
+
+    def asegurar_dosis_gripe(self, cantidad_necesaria):
+        # Se consumen primero las dosis ya abiertas. Si no alcanzan, se agotan
+        # dentro de este lote y el remanente pertenece a la ultima caja abierta.
+        while self.dosis_gripe_abiertas < cantidad_necesaria:
+            self.abrir_caja_gripe()
 
     def intentar_iniciar_vacunacion(self):
         if self.enfermero_estado != "Libre":
@@ -327,7 +336,7 @@ class Simulacion:
         if cantidad <= 0:
             return False
 
-        self.lote_actual_pacientes = [self.cola_covid.pop(0) for _ in range(cantidad)]
+        self.lote_actual_pacientes = [self.cola_covid.popleft() for _ in range(cantidad)]
         self.lote_actual_tipo = COVID
         self.cajas_covid_abiertas += cantidad // self.p.dosis_caja_covid
         self.enfermero_estado = "Ocupado"
@@ -341,12 +350,17 @@ class Simulacion:
         if not self.cola_gripe:
             return False
 
-        self.abrir_caja_gripe_si_hace_falta()
-        cantidad = min(len(self.cola_gripe), self.dosis_gripe_abiertas)
-        if cantidad <= 0:
-            return False
+        primer_grupo = self.pacientes[self.cola_gripe[0]].grupo_llegada
+        cantidad_primer_grupo = 0
+        for paciente_id in self.cola_gripe:
+            if self.pacientes[paciente_id].grupo_llegada != primer_grupo:
+                break
+            cantidad_primer_grupo += 1
 
-        self.lote_actual_pacientes = [self.cola_gripe.pop(0) for _ in range(cantidad)]
+        self.asegurar_dosis_gripe(cantidad_primer_grupo)
+        cantidad = cantidad_primer_grupo
+
+        self.lote_actual_pacientes = [self.cola_gripe.popleft() for _ in range(cantidad)]
         self.lote_actual_tipo = GRIPE
         self.dosis_gripe_abiertas -= cantidad
         if self.dosis_gripe_abiertas == 0:
@@ -466,7 +480,7 @@ class Simulacion:
             "Tiempo promedio espera": suma_espera_total / total_atendidos if total_atendidos else 0,
             "Tiempo promedio permanencia": suma_tiempo_sistema / total_vacunados if total_vacunados else 0,
             "Pacientes presentes": len(self.pacientes) if mostrar_objetos else "-",
-            "Detalle pacientes": self.descripcion_pacientes_presentes() if mostrar_objetos else "-",
+            "Detalle pacientes": "-",
             "_objetos": self.objetos_pacientes_presentes() if mostrar_objetos else [],
         }
         self.filas.append(fila)
@@ -490,6 +504,7 @@ class Simulacion:
                     "Estado": paciente.estado,
                     "Llegada (seg)": paciente.llegada,
                     "Grupo": paciente.grupo,
+                    "Grupo llegada": paciente.grupo_llegada,
                     "Inicio vacunacion": paciente.inicio_vacunacion if paciente.inicio_vacunacion else "-",
                 }
             )

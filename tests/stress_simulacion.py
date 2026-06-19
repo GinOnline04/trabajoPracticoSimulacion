@@ -67,11 +67,17 @@ def validar_resultado(nombre, simulacion, resultado):
     assert simulacion.covid_llegados == simulacion.covid_vacunados + activos_covid, f"{nombre}: balance COVID roto"
     assert simulacion.gripe_llegados == simulacion.gripe_vacunados + activos_gripe, f"{nombre}: balance gripe roto"
 
-    ids_cola = set(simulacion.cola_covid + simulacion.cola_gripe)
+    ids_cola = set(simulacion.cola_covid) | set(simulacion.cola_gripe)
     ids_lote = set(simulacion.lote_actual_pacientes)
     assert ids_cola.isdisjoint(ids_lote), f"{nombre}: paciente en cola y lote a la vez"
     assert ids_cola.issubset(simulacion.pacientes), f"{nombre}: cola apunta a paciente inexistente"
     assert ids_lote.issubset(simulacion.pacientes), f"{nombre}: lote apunta a paciente inexistente"
+
+    if simulacion.lote_actual_tipo == GRIPE and simulacion.lote_actual_pacientes:
+        pacientes_lote = [simulacion.pacientes[i] for i in simulacion.lote_actual_pacientes]
+        grupos_lote = {paciente.grupo_llegada for paciente in pacientes_lote}
+        assert len(grupos_lote) == 1, f"{nombre}: lote de gripe mezcla grupos"
+        assert len(pacientes_lote) == pacientes_lote[0].grupo, f"{nombre}: grupo de gripe dividido"
 
     assert simulacion.max_cola_covid >= len(simulacion.cola_covid), f"{nombre}: max cola COVID inconsistente"
     assert simulacion.max_cola_gripe >= len(simulacion.cola_gripe), f"{nombre}: max cola gripe inconsistente"

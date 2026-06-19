@@ -38,8 +38,10 @@ def validar_parametros(p):
         raise ValueError("Los parametros i y j no pueden ser negativos.")
     if p.media_llegada_covid <= 0 or p.media_llegada_gripe <= 0:
         raise ValueError("Las medias de llegada deben ser mayores a cero.")
-    if p.dosis_caja_covid <= 0 or p.dosis_caja_gripe <= 0:
-        raise ValueError("Las dosis por caja deben ser mayores a cero.")
+    if p.dosis_caja_covid <= 0:
+        raise ValueError("Las dosis por caja de COVID deben ser mayores a cero.")
+    if p.dosis_caja_gripe <= 0:
+        raise ValueError("Las dosis por caja de gripe deben ser mayores a cero.")
     if p.tiempo_por_paciente <= 0:
         raise ValueError("El tiempo por paciente debe ser mayor a cero.")
     if p.media_interrupcion <= 0:

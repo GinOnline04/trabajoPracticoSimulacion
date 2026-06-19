@@ -12,6 +12,7 @@ from src.vacunatorio.config.constantes import (
     EVENTO_FIN_SIMULACION,
     EVENTO_INICIO_INTERRUPCION,
     EVENTO_INTERRUPCION_DESCARTADA,
+    GRIPE,
 )
 from src.vacunatorio.config.parametros import Parametros
 from src.vacunatorio.dominio.modelos import Paciente
@@ -50,6 +51,8 @@ def probar_fila_final_se_muestra_aunque_no_caiga_en_rango():
     assert [fila["Iteracion"] for fila in filas[:3]] == [0, 1, 2]
     assert filas[-1]["Evento"] == EVENTO_FIN_SIMULACION
     assert filas[-1]["Iteracion"] > 2
+    assert filas[-1]["_objetos"] == []
+    assert filas[-1]["Pacientes presentes"] == "-"
 
 
 def probar_interrupcion_exactamente_en_x_no_se_procesa():
@@ -134,6 +137,7 @@ def probar_vector_muestra_atributos_de_pacientes_presentes():
         "Estado",
         "Llegada (seg)",
         "Grupo",
+        "Grupo llegada",
         "Inicio vacunacion",
     }
     assert fila["Pacientes presentes"] == len(fila["_objetos"])
@@ -151,6 +155,51 @@ def probar_interrupcion_parametrizable():
 
     assert buscar_estadistica(resultado, "Interrupciones ocurridas") >= 1
     assert buscar_estadistica(resultado, "Tiempo total interrumpido (seg)") > 0
+
+
+def probar_gripe_atiende_solo_el_primer_grupo_en_cola():
+    simulacion = Simulacion(Parametros(dosis_caja_gripe=10))
+    simulacion.crear_pacientes(GRIPE, 3)
+    simulacion.crear_pacientes(GRIPE, 3)
+
+    inicio = simulacion.iniciar_lote_gripe()
+
+    assert inicio is True
+    assert simulacion.lote_actual_pacientes == [1, 2, 3]
+    assert list(simulacion.cola_gripe) == [4, 5, 6]
+    assert all(simulacion.pacientes[i].estado == "En vacunacion" for i in [1, 2, 3])
+    assert all(simulacion.pacientes[i].estado == "Esperando" for i in [4, 5, 6])
+
+
+def probar_gripe_abre_otra_caja_y_atiende_completo_si_faltan_dosis():
+    simulacion = Simulacion(Parametros(dosis_caja_gripe=10))
+    simulacion.crear_pacientes(GRIPE, 3)
+    simulacion.crear_pacientes(GRIPE, 2)
+    simulacion.dosis_gripe_abiertas = 2
+    simulacion.vencimiento_gripe = 100
+    simulacion.cajas_gripe_abiertas = 1
+
+    inicio = simulacion.iniciar_lote_gripe()
+
+    assert inicio is True
+    assert simulacion.lote_actual_pacientes == [1, 2, 3]
+    assert list(simulacion.cola_gripe) == [4, 5]
+    assert simulacion.pacientes[3].grupo_llegada != simulacion.pacientes[4].grupo_llegada
+    assert simulacion.cajas_gripe_abiertas == 2
+    assert simulacion.dosis_gripe_abiertas == 9
+    assert simulacion.vencimiento_gripe == simulacion.reloj + simulacion.tiempo_vencimiento_gripe
+
+
+def probar_gripe_abre_varias_cajas_si_el_parametro_es_chico():
+    simulacion = Simulacion(Parametros(dosis_caja_gripe=1))
+    simulacion.crear_pacientes(GRIPE, 4)
+
+    inicio = simulacion.iniciar_lote_gripe()
+
+    assert inicio is True
+    assert simulacion.lote_actual_pacientes == [1, 2, 3, 4]
+    assert simulacion.cajas_gripe_abiertas == 4
+    assert simulacion.dosis_gripe_abiertas == 0
 
 
 def probar_interrupcion_exponencial_muestra_rnd():
@@ -218,6 +267,9 @@ if __name__ == "__main__":
     probar_runge_kutta_configurable()
     probar_vector_muestra_atributos_de_pacientes_presentes()
     probar_interrupcion_parametrizable()
+    probar_gripe_atiende_solo_el_primer_grupo_en_cola()
+    probar_gripe_abre_otra_caja_y_atiende_completo_si_faltan_dosis()
+    probar_gripe_abre_varias_cajas_si_el_parametro_es_chico()
     probar_interrupcion_exponencial_muestra_rnd()
     probar_interrupcion_descartada_no_modifica_la_actual()
     probar_tiempo_interrumpido_se_acumula_con_el_reloj()
